@@ -9,6 +9,7 @@ A professional Telegram trading bot that generates crypto trading signals with A
 - **📊 Technical Analysis**: AI analyzes market indicators (RSI, MACD, Volume, etc.)
 - **⚡ Smart Leverage**: Conservative leverage (1x-10x) based on balance and confidence
 - **🛑 Stop Loss & Take Profit**: Automatic SL/TP calculation with 3 profit targets
+- **📊 Signal Review System**: Track accuracy and learn from outcomes
 - **💬 Telegram Interface**: Interactive bot with commands for signals, stats, and balance
 - **🗄️ Database Logging**: SQLite database stores all signals and performance metrics
 - **🛡️ Conservative Approach**: Built for small accounts ($20 starting balance)
@@ -21,6 +22,7 @@ main.py                    # Application entry point
 ├── risk_management.py     # Dynamic risk scaling logic
 ├── ai_signal_confirmation.py  # PyTorch neural network for signal validation
 ├── signal_generator.py    # Signal generation engine
+├── signal_evaluator.py    # Signal review and accuracy tracking
 └── telegram_bot.py        # Telegram bot interface
 ```
 
@@ -67,6 +69,9 @@ python main.py
 |---------|-------------|
 | `/start` | Show welcome message |
 | `/signal` | Generate a new AI-validated trading signal |
+| `/review` | Evaluate signal accuracy and outcomes |
+| `/accuracy` | Show accuracy statistics and performance |
+| `/losers` | Review losing signals to learn from mistakes |
 | `/stats` | View trading statistics and history |
 | `/balance` | Check account balance and risk parameters |
 | `/help` | Show detailed help and documentation |

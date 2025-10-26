@@ -35,7 +35,14 @@ class TradeSignal(Base):
     ai_confirmed = Column(Boolean, default=False)
     risk_percent = Column(Float, nullable=False)
     position_size = Column(Float, nullable=False)
-    status = Column(String, default='PENDING')  # PENDING, EXECUTED, REJECTED
+    status = Column(String, default='PENDING')  # PENDING, EXECUTED, REJECTED, EVALUATED
+    outcome = Column(String, nullable=True)  # WIN, LOSS, PENDING
+    tp_hit = Column(String, nullable=True)  # TP1, TP2, TP3, NONE
+    hit_stop_loss = Column(Boolean, default=False)
+    final_price = Column(Float, nullable=True)  # Final price when evaluated
+    profit_loss = Column(Float, nullable=True)  # Actual P&L in USD
+    evaluation_timestamp = Column(DateTime, nullable=True)
+    review_notes = Column(String, nullable=True)  # Manual review notes
     notes = Column(String, nullable=True)
 
 
@@ -140,6 +147,66 @@ class DatabaseManager:
             session.rollback()
             logger.error(f"Failed to save metrics: {e}")
             raise
+        finally:
+            session.close()
+    
+    def get_unevaluated_signals(self) -> List[TradeSignal]:
+        """Get all signals that haven't been evaluated yet."""
+        session = self.Session()
+        try:
+            signals = session.query(TradeSignal).filter(
+                TradeSignal.outcome == None
+            ).all()
+            return signals
+        finally:
+            session.close()
+    
+    def update_signal_outcome(self, signal_id: int, outcome_data: Dict) -> bool:
+        """Update signal with evaluation results."""
+        session = self.Session()
+        try:
+            signal = session.query(TradeSignal).filter_by(id=signal_id).first()
+            if signal:
+                signal.outcome = outcome_data.get('outcome')
+                signal.tp_hit = outcome_data.get('tp_hit')
+                signal.hit_stop_loss = outcome_data.get('hit_stop_loss', False)
+                signal.final_price = outcome_data.get('final_price')
+                signal.profit_loss = outcome_data.get('profit_loss')
+                signal.evaluation_timestamp = datetime.utcnow()
+                signal.status = 'EVALUATED'
+                session.commit()
+                logger.info(f"Signal {signal_id} evaluated: {outcome_data.get('outcome')}")
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update signal outcome: {e}")
+            return False
+        finally:
+            session.close()
+    
+    def get_signals_by_outcome(self, outcome: str) -> List[TradeSignal]:
+        """Get signals filtered by outcome (WIN, LOSS, PENDING)."""
+        session = self.Session()
+        try:
+            signals = session.query(TradeSignal).filter(
+                TradeSignal.outcome == outcome
+            ).order_by(TradeSignal.timestamp.desc()).all()
+            return signals
+        finally:
+            session.close()
+    
+    def get_signals_by_date(self, date: datetime) -> List[TradeSignal]:
+        """Get all signals generated on a specific date."""
+        session = self.Session()
+        try:
+            start = date.replace(hour=0, minute=0, second=0)
+            end = date.replace(hour=23, minute=59, second=59)
+            signals = session.query(TradeSignal).filter(
+                TradeSignal.timestamp >= start,
+                TradeSignal.timestamp <= end
+            ).all()
+            return signals
         finally:
             session.close()
 

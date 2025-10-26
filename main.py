@@ -10,6 +10,7 @@ from database import DatabaseManager
 from risk_management import RiskManager
 from ai_signal_confirmation import AISignalConfirmer
 from signal_generator import SignalGenerator
+from signal_evaluator import SignalEvaluator
 from telegram_bot import TradingBot
 
 # Configure logging
@@ -79,11 +80,18 @@ def initialize_system(config):
     )
     logger.info("✓ Signal generator initialized")
     
+    # Initialize signal evaluator
+    signal_evaluator = SignalEvaluator(
+        db_manager=db_manager
+    )
+    logger.info("✓ Signal evaluator initialized")
+    
     # Initialize Telegram bot
     telegram_bot = TradingBot(
         bot_token=config['telegram_bot_token'],
         signal_generator=signal_generator,
-        db_manager=db_manager
+        db_manager=db_manager,
+        signal_evaluator=signal_evaluator
     )
     logger.info("✓ Telegram bot initialized")
     
