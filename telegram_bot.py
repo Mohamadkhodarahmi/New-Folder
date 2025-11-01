@@ -5,6 +5,7 @@ Provides interactive interface for managing trades and receiving alerts.
 
 import logging
 import asyncio
+import os
 from typing import Optional
 from telegram import Update
 from telegram.ext import (
@@ -23,7 +24,7 @@ class TradingBot:
     Handles user commands and sends trading signals via Telegram.
     """
 
-    def __init__(self, bot_token: str, signal_generator, db_manager, signal_evaluator):
+    def __init__(self, bot_token: str, signal_generator, db_manager, signal_evaluator, proxy_url: Optional[str] = None):
         """
         Initialize the Telegram bot.
         
@@ -32,11 +33,21 @@ class TradingBot:
             signal_generator: Instance of SignalGenerator
             db_manager: Instance of DatabaseManager
             signal_evaluator: Instance of SignalEvaluator
+            proxy_url: Optional proxy URL (e.g., 'socks5://user:pass@host:port' or 'http://host:port')
         """
         self.signal_generator = signal_generator
         self.db_manager = db_manager
         self.signal_evaluator = signal_evaluator
-        self.application = Application.builder().token(bot_token).build()
+        
+        # Build application with optional proxy
+        app_builder = Application.builder().token(bot_token)
+        
+        # Add proxy if provided
+        if proxy_url:
+            app_builder = app_builder.proxy_url(proxy_url)
+            logger.info(f"Using proxy for Telegram: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
+        
+        self.application = app_builder.build()
         
         # Register command handlers
         self.application.add_handler(CommandHandler("start", self.start_command))

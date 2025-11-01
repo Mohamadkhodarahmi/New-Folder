@@ -51,7 +51,8 @@ def load_configuration():
         'max_risk_percent': float(os.getenv('MAX_RISK_PERCENT') or os.environ.get('MAX_RISK_PERCENT', '2.0')),
         'model_confidence_threshold': float(os.getenv('MODEL_CONFIDENCE_THRESHOLD') or os.environ.get('MODEL_CONFIDENCE_THRESHOLD', '0.75')),
         'exchange_name': os.getenv('EXCHANGE_NAME') or os.environ.get('EXCHANGE_NAME', 'binance'),
-        'use_real_data': os.getenv('USE_REAL_DATA', 'true').lower() == 'true'
+        'use_real_data': os.getenv('USE_REAL_DATA', 'true').lower() == 'true',
+        'telegram_proxy': os.getenv('TELEGRAM_PROXY') or os.environ.get('TELEGRAM_PROXY')  # Optional proxy for Telegram
     }
     
     # Validate required configuration
@@ -111,7 +112,8 @@ def initialize_system(config):
         bot_token=config['telegram_bot_token'],
         signal_generator=signal_generator,
         db_manager=db_manager,
-        signal_evaluator=signal_evaluator
+        signal_evaluator=signal_evaluator,
+        proxy_url=config.get('telegram_proxy')  # Optional proxy for countries where Telegram is blocked
     )
     logger.info("✓ Telegram bot initialized")
     
