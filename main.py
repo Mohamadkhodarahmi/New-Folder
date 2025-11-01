@@ -14,34 +14,52 @@ from signal_evaluator import SignalEvaluator
 from telegram_bot import TradingBot
 
 # Configure logging
+# On Liara, log to stdout (which is captured by Liara logs)
+# On local, also log to file
+log_handlers = [logging.StreamHandler()]
+
+# Only add file handler if running locally (not on Liara)
+if os.path.exists('/app'):
+    # We're likely on Liara, only use stdout
+    log_level = logging.INFO
+else:
+    # Local development, add file handler
+    log_handlers.append(logging.FileHandler('trading_bot.log'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('trading_bot.log'),
-        logging.StreamHandler()
-    ]
+    handlers=log_handlers
 )
 
 logger = logging.getLogger(__name__)
 
 
 def load_configuration():
-    """Load configuration from environment variables."""
-    load_dotenv('config.env')
+    """Load configuration from environment variables (Liara or local)."""
+    # Try to load from .env file (for local development)
+    # On Liara, environment variables are set directly
+    if os.path.exists('config.env'):
+        load_dotenv('config.env')
+    else:
+        # On Liara, use environment variables directly
+        logger.info("config.env not found, using environment variables (Liara mode)")
     
     config = {
-        'telegram_bot_token': os.getenv('TELEGRAM_BOT_TOKEN'),
-        'initial_balance': float(os.getenv('INITIAL_BALANCE', '20.0')),
-        'max_risk_percent': float(os.getenv('MAX_RISK_PERCENT', '2.0')),
-        'model_confidence_threshold': float(os.getenv('MODEL_CONFIDENCE_THRESHOLD', '0.75'))
+        'telegram_bot_token': os.getenv('TELEGRAM_BOT_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN'),
+        'initial_balance': float(os.getenv('INITIAL_BALANCE') or os.environ.get('INITIAL_BALANCE', '20.0')),
+        'max_risk_percent': float(os.getenv('MAX_RISK_PERCENT') or os.environ.get('MAX_RISK_PERCENT', '2.0')),
+        'model_confidence_threshold': float(os.getenv('MODEL_CONFIDENCE_THRESHOLD') or os.environ.get('MODEL_CONFIDENCE_THRESHOLD', '0.75')),
+        'exchange_name': os.getenv('EXCHANGE_NAME') or os.environ.get('EXCHANGE_NAME', 'binance'),
+        'use_real_data': os.getenv('USE_REAL_DATA', 'true').lower() == 'true'
     }
     
     # Validate required configuration
     if not config['telegram_bot_token']:
-        raise ValueError("TELEGRAM_BOT_TOKEN is required in config.env")
+        raise ValueError("TELEGRAM_BOT_TOKEN is required. Set it in Liara dashboard or config.env")
     
     logger.info("Configuration loaded successfully")
+    logger.info(f"Exchange: {config['exchange_name']}, Real data: {config['use_real_data']}")
     return config
 
 
@@ -76,7 +94,9 @@ def initialize_system(config):
     # Initialize signal generator
     signal_generator = SignalGenerator(
         ai_confirmer=ai_confirmer,
-        risk_manager=risk_manager
+        risk_manager=risk_manager,
+        exchange_name=config.get('exchange_name', 'binance'),
+        use_real_data=config.get('use_real_data', True)
     )
     logger.info("✓ Signal generator initialized")
     
