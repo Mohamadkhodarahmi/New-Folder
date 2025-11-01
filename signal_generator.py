@@ -1,12 +1,17 @@
 """
 Trading signal generation engine.
 Generates BUY/SELL signals based on technical analysis and market conditions.
+Now includes real market data fetching, range detection, and optimal entry finding.
 """
 
 import logging
 import random
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+
+from market_data_fetcher import MarketDataFetcher
+from range_detector import RangeDetector, MarketCondition
+from optimal_entry_finder import OptimalEntryFinder, EntryType
 
 logger = logging.getLogger(__name__)
 
@@ -15,29 +20,64 @@ class SignalGenerator:
     """
     Generates trading signals based on technical indicators.
     Integrates with AI confirmation system for validation.
+    Uses real market data, range detection, and optimal entry finding.
     """
 
-    def __init__(self, ai_confirmer, risk_manager):
+    def __init__(
+        self, 
+        ai_confirmer, 
+        risk_manager,
+        exchange_name: str = 'binance',
+        use_real_data: bool = True
+    ):
         """
         Initialize signal generator with AI confirmer and risk manager.
         
         Args:
             ai_confirmer: Instance of AISignalConfirmer for signal validation
             risk_manager: Instance of RiskManager for position sizing
+            exchange_name: Exchange name for data fetching (default: 'binance')
+            use_real_data: Use real market data if True, mock data if False
         """
         self.ai_confirmer = ai_confirmer
         self.risk_manager = risk_manager
         self.supported_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
+        self.use_real_data = use_real_data
+        
+        # Initialize market data components
+        if use_real_data:
+            try:
+                self.data_fetcher = MarketDataFetcher(exchange_name=exchange_name, sandbox=False)
+                logger.info("Real market data fetcher initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize real data fetcher: {e}. Falling back to mock data.")
+                self.use_real_data = False
+                self.data_fetcher = None
+        else:
+            self.data_fetcher = None
+        
+        # Initialize range detector and entry finder
+        self.range_detector = RangeDetector(
+            adx_threshold=25.0,
+            range_threshold=0.02,
+            lookback_periods=50
+        )
+        self.entry_finder = OptimalEntryFinder(
+            pullback_percent=0.01,
+            breakout_confirmation=2,
+            support_resistance_tolerance=0.005
+        )
         
         # Signal quality parameters
         self.min_confidence = 0.70
         self.min_signal_strength = 0.5
         
-        logger.info("Signal generator initialized")
+        logger.info(f"Signal generator initialized (real_data={self.use_real_data})")
 
     def generate_signal(self, symbol: Optional[str] = None) -> Optional[Dict]:
         """
         Generate a trading signal for a given symbol.
+        Now includes range detection and optimal entry finding.
         
         Args:
             symbol: Trading pair symbol (e.g., 'BTC/USDT')
@@ -50,15 +90,98 @@ class SignalGenerator:
         if symbol is None:
             symbol = random.choice(self.supported_symbols)
         
-        # Generate random signal type (BUY or SELL)
-        signal_type = random.choice(['BUY', 'SELL'])
+        logger.info(f"Analyzing {symbol} for trading opportunities...")
         
-        # Simulate market data analysis
-        market_data = self.ai_confirmer.generate_mock_market_data(signal_type)
+        # Initialize default values
+        entry_type = EntryType.NO_ENTRY
+        entry_details = {'entry_reason': 'No analysis performed'}
+        market_condition = MarketCondition.RANGE_BOUND
+        condition_details = {}
+        signal_type = None
+        entry_price = 0
+        formatted_market_data = {}
+        
+        # Fetch real market data or use mock
+        if self.use_real_data and self.data_fetcher:
+            try:
+                market_data = self.data_fetcher.get_market_data_for_signal(symbol)
+                ohlcv_df = market_data.get('ohlcv_df')
+                indicators = market_data.get('full_indicators', {})
+                
+                # Detect market condition (range vs trending)
+                market_condition, condition_details = self.range_detector.detect_market_condition(
+                    indicators=indicators,
+                    ohlcv_df=ohlcv_df
+                )
+                
+                # Check if market is tradeable (avoid range-bound markets)
+                if not self.range_detector.is_tradeable(market_condition):
+                    logger.info(f"Signal rejected for {symbol}: Market is {market_condition.value} "
+                               f"(ADX: {condition_details.get('adx', 0):.2f}). Avoiding range-bound markets.")
+                    return None
+                
+                # Find optimal entry point
+                entry_type, entry_details, suggested_signal = self.entry_finder.find_optimal_entry(
+                    market_condition=market_condition.value,
+                    indicators=indicators,
+                    ohlcv_df=ohlcv_df
+                )
+                
+                # Check if optimal entry was found
+                if entry_type == EntryType.NO_ENTRY:
+                    logger.info(f"Signal rejected for {symbol}: {entry_details.get('message', 'No optimal entry found')}")
+                    return None
+                
+                # Use suggested signal type from entry finder
+                signal_type = suggested_signal
+                entry_price = indicators.get('current_price', 0)
+                
+                # Format market data for AI confirmation
+                formatted_market_data = {
+                    'rsi': indicators.get('rsi', 50.0),
+                    'macd': indicators.get('macd', 0.0),
+                    'macd_signal': indicators.get('macd_signal', 0.0),
+                    'volume_change': indicators.get('volume_change', 0.0),
+                    'price_change_short': indicators.get('price_change_short', 0.0),
+                    'price_change_long': indicators.get('price_change_long', 0.0),
+                    'volatility': indicators.get('volatility', 0.0),
+                    'support_resistance': indicators.get('support_distance', 0.0),
+                    'trend_strength': indicators.get('trend_strength', 0.0),
+                    'volume_profile': indicators.get('volume_profile', 1.0)
+                }
+                
+                logger.info(f"Market condition: {market_condition.value}, Entry type: {entry_type.value}")
+                
+            except Exception as e:
+                logger.error(f"Error fetching real data for {symbol}: {e}. Falling back to mock data.")
+                # Fallback to mock data
+                signal_type = random.choice(['BUY', 'SELL'])
+                market_data = self.ai_confirmer.generate_mock_market_data(signal_type)
+                formatted_market_data = market_data
+                entry_price = self._simulate_entry_price(symbol)
+                entry_type = EntryType.TREND_FOLLOW
+                entry_details = {'entry_reason': 'Mock data fallback'}
+                market_condition = MarketCondition.WEAK_UPTREND
+                condition_details = {}
+        else:
+            # Use mock data (fallback)
+            signal_type = random.choice(['BUY', 'SELL'])
+            market_data = self.ai_confirmer.generate_mock_market_data(signal_type)
+            formatted_market_data = market_data
+            entry_price = self._simulate_entry_price(symbol)
+            entry_type = EntryType.TREND_FOLLOW
+            entry_details = {'entry_reason': 'Mock data'}
+            market_condition = MarketCondition.WEAK_UPTREND
+            condition_details = {}
+        
+        # Validate we have signal type and entry price
+        if not signal_type or entry_price <= 0:
+            logger.warning(f"Invalid signal data for {symbol}")
+            return None
         
         # Get AI confirmation
         is_confirmed, confidence = self.ai_confirmer.confirm_signal(
-            signal_type, market_data
+            signal_type, formatted_market_data
         )
         
         # Only proceed if AI confirms the signal
@@ -66,9 +189,6 @@ class SignalGenerator:
             logger.info(f"Signal rejected for {symbol}: "
                        f"AI confidence {confidence:.2%} below threshold")
             return None
-        
-        # Simulate entry price (here you would fetch real market price)
-        entry_price = self._simulate_entry_price(symbol)
         
         # Calculate position size using risk manager
         position_size, risk_details = self.risk_manager.calculate_position_size(
@@ -106,8 +226,13 @@ class SignalGenerator:
             'position_size': position_size,
             'risk_amount_usd': risk_details['risk_amount_usd'],
             'stop_loss_percent': risk_details['stop_loss_percent'],
-            'market_data': market_data,
-            'timestamp': datetime.utcnow().isoformat()
+            'market_data': formatted_market_data,
+            'timestamp': datetime.utcnow().isoformat(),
+            # Additional metadata from new systems
+            'market_condition': market_condition.value,
+            'entry_type': entry_type.value,
+            'entry_details': entry_details,
+            'condition_details': condition_details
         }
         
         # Validate signal risk
@@ -266,6 +391,12 @@ class SignalGenerator:
         tp1_distance = abs(tp1 - entry) / entry * 100
         rr_ratio = tp1_distance / sl_distance if sl_distance > 0 else 0
         
+        # Get additional info if available
+        market_condition = signal.get('market_condition', 'unknown')
+        entry_type = signal.get('entry_type', 'unknown')
+        entry_reason = signal.get('entry_details', {}).get('entry_reason', 'Technical analysis')
+        risk_reward = signal.get('entry_details', {}).get('risk_reward', 'moderate')
+        
         message = f"""
 📊 TRADING SIGNAL
 
@@ -273,6 +404,11 @@ class SignalGenerator:
 🎯 Signal: {sig_type}
 ⚡ Leverage: {leverage:.1f}x
 🤖 AI Confidence: {confidence:.1%}
+
+📈 Market Condition: {market_condition.replace('_', ' ').title()}
+🎯 Entry Strategy: {entry_type.replace('_', ' ').title()}
+💡 Entry Reason: {entry_reason}
+📊 Risk/Reward: {risk_reward.title()}
 
 💵 Entry Price: ${entry:,.2f}
 🛑 Stop Loss: ${stop_loss:,.2f} ({sl_distance:.2f}%)
@@ -285,6 +421,7 @@ class SignalGenerator:
 ⏰ Time: {signal['timestamp']}
 
 {'✅ AI CONFIRMED' if signal['ai_confirmed'] else '❌ AI REJECTED'}
+{'✅ TRENDING MARKET - NOT RANGE-BOUND' if market_condition != 'range_bound' else ''}
 """
         
         return message.strip()
